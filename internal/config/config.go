@@ -2,12 +2,19 @@
 package config
 
 import (
+	"bytes"
+	"embed"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"strings"
 
 	"github.com/spf13/viper"
 )
+
+//go:embed embedded
+var embeddedFS embed.FS
 
 // Config 是应用的配置。目前只需要大模型的 base_url / api_key / model。
 type Config struct {
@@ -39,6 +46,11 @@ func Load() (*Config, error) {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
 			return nil, fmt.Errorf("read config: %w", err)
 		}
+		// 外部配置文件找不到时,回退到编译进二进制的默认配置,
+		// 这样单独分发 exe 也无需携带 configs/ 目录。
+		if err := readEmbedded(v); err != nil {
+			return nil, err
+		}
 	}
 
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
@@ -49,6 +61,22 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("unmarshal config: %w", err)
 	}
 	return &c, nil
+}
+
+// readEmbedded 从二进制内置配置里读入 viper。
+// 优先用本地的 embedded/default.yaml(真实值,已被 gitignore,不提交);
+// 该文件不存在时(如别人 clone 后构建)回退到提交在库里的
+// embedded/default.example.yaml,保证任何环境都能编译运行。
+func readEmbedded(v *viper.Viper) error {
+	v.SetConfigType("yaml")
+	data, err := embeddedFS.ReadFile("embedded/default.yaml")
+	if errors.Is(err, fs.ErrNotExist) {
+		data, err = embeddedFS.ReadFile("embedded/default.example.yaml")
+	}
+	if err != nil {
+		return fmt.Errorf("read embedded config: %w", err)
+	}
+	return v.ReadConfig(bytes.NewReader(data))
 }
 
 // setDefaults 设定默认值,与 main.go 之前硬编码的行为保持一致。
