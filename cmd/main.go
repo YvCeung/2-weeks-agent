@@ -1,104 +1,42 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"log"
-	"net/http"
-	"time"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
 
 	"YvCeung/2-weeks-agent/internal/config"
 )
 
-// https://api-docs.deepseek.com/zh-cn/
-
-type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-type ChatRequest struct {
-	Model    string    `json:"model"`
-	Messages []Message `json:"messages"`
-	Stream   bool      `json:"stream"`
-}
-
-type ChatResponse struct {
-	Choices []struct {
-		Message Message `json:"message"`
-	} `json:"choices"`
-	Usage struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
-		TotalTokens      int `json:"total_tokens"`
-	} `json:"usage"`
-}
-
+// main 只负责程序入口:注册退出信号、解析参数、加载配置,
+// 模型调用的编排逻辑在 terminal.go 中。
 func main() {
+	ctx, stop := signal.NotifyContext(
+		context.Background(),
+		syscall.SIGINT,
+		syscall.SIGTERM,
+	)
+	defer stop()
+
+	question := strings.TrimSpace(strings.Join(os.Args[1:], " "))
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatal(err)
-	}
-	apiKey := cfg.LLM.APIKey
-	if apiKey == "" {
-		log.Fatal("请设置 configs/config.yaml 中的 llm.api_key,或 LLM_SECRET_KEY 环境变量")
+		fmt.Fprintln(os.Stderr, "配置错误:", err)
+		os.Exit(2)
 	}
 
-	question := "你是谁，能帮我做哪些东西"
-	payload := ChatRequest{
-		Model: cfg.LLM.Model,
-		Messages: []Message{
-			{Role: "user", Content: question},
-		},
-		Stream: false,
+	// 命令行带问题则单轮问答;不带问题进入交互式循环提问。
+	var runErr error
+	if question != "" {
+		runErr = run(ctx, cfg, question)
+	} else {
+		runErr = runLoop(ctx, cfg)
 	}
-	body, err := json.Marshal(payload)
-	if err != nil {
-		log.Fatal(err)
+	if runErr != nil {
+		fmt.Fprintln(os.Stderr, "\n出错:", runErr)
+		os.Exit(1)
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(
-		ctx,
-		http.MethodPost,
-		cfg.LLM.BaseURL+"/chat/completions",
-		bytes.NewReader(body),
-	)
-	if err != nil {
-		log.Fatal(err)
-	}
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
-		log.Fatalf("unexpected status code %d (%s)", resp.StatusCode, string(raw))
-	}
-
-	var result ChatResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		log.Fatal(err)
-	}
-	if len(result.Choices) == 0 {
-		log.Fatal("No choices found")
-	}
-
-	fmt.Println(result.Choices[0].Message.Content)
-	fmt.Printf(
-		"token: input=%d output=%d total=%d\n",
-		result.Usage.PromptTokens,
-		result.Usage.CompletionTokens,
-		result.Usage.TotalTokens,
-	)
 }

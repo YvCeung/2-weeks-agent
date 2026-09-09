@@ -7,3 +7,6 @@
 # 本地配置与密钥（勿提交）
 .env
 configs/config.yaml
+
+# Go 构建产物
+/bin/
