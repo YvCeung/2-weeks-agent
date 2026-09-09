@@ -1,0 +1,7 @@
+# 2-weeks-agent 配置样例。复制为 configs/config.yaml 后按需修改。
+# 敏感项建议用环境变量覆盖(LLM_SECRET_KEY / DEEPSEEK_API_KEY)。
+
+llm:
+  base_url: https://api.deepseek.com
+  api_key: ""               # 用 LLM_SECRET_KEY / DEEPSEEK_API_KEY 覆盖
+  model: deepseek-v4-pro

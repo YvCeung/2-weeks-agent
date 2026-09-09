@@ -8,15 +8,12 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os"
 	"time"
+
+	"YvCeung/2-weeks-agent/internal/config"
 )
 
 // https://api-docs.deepseek.com/zh-cn/
-const (
-	baseUrlOpenai = "https://api.deepseek.com"
-	modelName     = "deepseek-v4-pro"
-)
 
 type Message struct {
 	Role    string `json:"role"`
@@ -41,15 +38,18 @@ type ChatResponse struct {
 }
 
 func main() {
-	var apiKey string
-	apiKey = os.Getenv("LLM_SECRET_KEY")
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatal(err)
+	}
+	apiKey := cfg.LLM.APIKey
 	if apiKey == "" {
-		log.Fatal("Please set LLM_SECRET_KEY environment variable")
+		log.Fatal("请设置 configs/config.yaml 中的 llm.api_key,或 LLM_SECRET_KEY 环境变量")
 	}
 
 	question := "你是谁，能帮我做哪些东西"
 	payload := ChatRequest{
-		Model: modelName,
+		Model: cfg.LLM.Model,
 		Messages: []Message{
 			{Role: "user", Content: question},
 		},
@@ -66,7 +66,7 @@ func main() {
 	req, err := http.NewRequestWithContext(
 		ctx,
 		http.MethodPost,
-		baseUrlOpenai+"/chat/completions",
+		cfg.LLM.BaseURL+"/chat/completions",
 		bytes.NewReader(body),
 	)
 	if err != nil {
