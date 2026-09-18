@@ -3,3 +3,11 @@
 
 # macOS
 .DS_Store
+
+# 本地配置与密钥（勿提交）
+.env
+configs/config.yaml
+internal/config/embedded/default.yaml
+
+# Go 构建产物
+/bin/

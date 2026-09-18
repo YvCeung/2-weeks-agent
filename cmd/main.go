@@ -1,104 +1,42 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"log"
-	"net/http"
 	"os"
-	"time"
+	"os/signal"
+	"strings"
+	"syscall"
+
+	"YvCeung/2-weeks-agent/internal/config"
 )
 
-// https://api-docs.deepseek.com/zh-cn/
-const (
-	baseUrlOpenai = "https://api.deepseek.com"
-	modelName     = "deepseek-v4-pro"
-)
-
-type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-type ChatRequest struct {
-	Model    string    `json:"model"`
-	Messages []Message `json:"messages"`
-	Stream   bool      `json:"stream"`
-}
-
-type ChatResponse struct {
-	Choices []struct {
-		Message Message `json:"message"`
-	} `json:"choices"`
-	Usage struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
-		TotalTokens      int `json:"total_tokens"`
-	} `json:"usage"`
-}
-
+// main 只负责程序入口:注册退出信号、解析参数、加载配置,
+// 模型调用的编排逻辑在 terminal.go 中。
 func main() {
-	var apiKey string
-	apiKey = os.Getenv("LLM_SECRET_KEY")
-	if apiKey == "" {
-		log.Fatal("Please set LLM_SECRET_KEY environment variable")
-	}
-
-	question := "你是谁，能帮我做哪些东西"
-	payload := ChatRequest{
-		Model: modelName,
-		Messages: []Message{
-			{Role: "user", Content: question},
-		},
-		Stream: false,
-	}
-	body, err := json.Marshal(payload)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(
-		ctx,
-		http.MethodPost,
-		baseUrlOpenai+"/chat/completions",
-		bytes.NewReader(body),
+	ctx, stop := signal.NotifyContext(
+		context.Background(),
+		syscall.SIGINT,
+		syscall.SIGTERM,
 	)
+	defer stop()
+
+	question := strings.TrimSpace(strings.Join(os.Args[1:], " "))
+	cfg, err := config.Load()
 	if err != nil {
-		log.Fatal(err)
-	}
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
-		log.Fatalf("unexpected status code %d (%s)", resp.StatusCode, string(raw))
+		fmt.Fprintln(os.Stderr, "配置错误:", err)
+		os.Exit(2)
 	}
 
-	var result ChatResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		log.Fatal(err)
+	// 命令行带问题则单轮问答;不带问题进入交互式循环提问。
+	var runErr error
+	if question != "" {
+		runErr = run(ctx, cfg, question)
+	} else {
+		runErr = runLoop(ctx, cfg)
 	}
-	if len(result.Choices) == 0 {
-		log.Fatal("No choices found")
+	if runErr != nil {
+		fmt.Fprintln(os.Stderr, "\n出错:", runErr)
+		os.Exit(1)
 	}
-
-	fmt.Println(result.Choices[0].Message.Content)
-	fmt.Printf(
-		"token: input=%d output=%d total=%d\n",
-		result.Usage.PromptTokens,
-		result.Usage.CompletionTokens,
-		result.Usage.TotalTokens,
-	)
 }

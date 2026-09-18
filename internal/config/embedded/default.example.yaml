@@ -1,0 +1,8 @@
+# 内置配置样例(提交到库)。复制为 default.yaml 并填入真实 api_key 后编译,
+# 产出的 exe 即可开箱即用——但注意 key 会随 exe 一起分发。
+# 本项目里 default.yaml 已被 gitignore,不会提交到代码库。
+
+llm:
+  base_url: https://api.deepseek.com
+  api_key: ""               # 填入真实 key,或用 LLM_API_KEY 环境变量覆盖
+  model: deepseek-v4-pro
